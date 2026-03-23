@@ -1467,7 +1467,12 @@ html, body{
   vertical-align: middle;
   margin-left: 4px;
 }
-
+.logo{
+  height: 26px;
+  width: auto;
+  vertical-align: middle;
+  margin-left: 4px;
+}
 
 
 
