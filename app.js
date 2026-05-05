@@ -1,257 +1,268 @@
+// ===== DOM Helpers =====
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+function show(el) { if (el) el.style.display = ""; }
+function hide(el) { if (el) el.style.display = "none"; }
+function toggle(el, on) { if (el) el.style.display = on ? "" : "none"; }
+function isHidden(el) { return !el || el.classList.contains("hidden") || el.style.display === "none"; }
+
+
+// ===== Leaflet Control Helper =====
+function lazyControl(position, className) {
+  let ctrl = null;
+  return {
+    ensure(buildHtml) {
+      if (ctrl) return;
+      ctrl = L.control({ position });
+      ctrl.onAdd = () => {
+        const div = L.DomUtil.create("div", className);
+        div.innerHTML = buildHtml();
+        L.DomEvent.disableClickPropagation(div);
+        return div;
+      };
+      ctrl.addTo(map);
+    },
+    el() { return $(`.${className}`); },
+    show(on, html) {
+      this.ensure(() => html || "");
+      toggle(this.el(), on);
+      if (on && html !== undefined) { const node = this.el(); if (node) node.innerHTML = html; }
+    },
+  };
+}
+
+
 // ===== 1) Mappa =====
 const DEFAULT_VIEW = { center: [45.497, 9.644], zoom: 15 };
 
 const map = L.map("map", { zoomControl: false });
-  function kickLeafletResize(){
+
+function kickLeafletResize() {
   setTimeout(() => map.invalidateSize(), 50);
   setTimeout(() => map.invalidateSize(), 250);
 }
 
 window.addEventListener("resize", kickLeafletResize);
 window.addEventListener("orientationchange", kickLeafletResize);
-  map.setView(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom);
+map.setView(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom);
 
 L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
   maxZoom: 19,
   attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
 }).addTo(map);
-// se l’utente trascina la mappa, smetti di seguirlo (stile Maps)
+
+// se l'utente trascina la mappa, smetti di seguirlo (stile Maps)
 map.on("dragstart", () => {
-  if (tracking) followUser = false;
+  if (Track.active) Track.followUser = false;
 });
+
+
 // ===== Pane itinerari (sotto ai marker) =====
 map.createPane("routesPane");
-map.getPane("routesPane").style.zIndex = 350; // markerPane è sopra (~600)
+map.getPane("routesPane").style.zIndex = 350;
+
 
 // ===== Itinerari (LineString) + Punti pericolosi (Point) =====
-let itinerariLayer = null;
-let routesVisible = true;
+const Route = {
+  itinerariLayer: null,
+  visible: true,
+  polylines: [],
+  activeLayer: null,
+  NEAR_METERS: 180,
+};
 
-function setRoutesVisible(on){
-  routesVisible = !!on;
+function setRoutesVisible(on) {
+  Route.visible = !!on;
 
-  if (itinerariLayer){
-    if (routesVisible) itinerariLayer.addTo(map);
-    else itinerariLayer.remove();
+  if (Route.itinerariLayer) {
+    if (Route.visible) Route.itinerariLayer.addTo(map);
+    else Route.itinerariLayer.remove();
   }
 
-  // se nascondi i percorsi mentre sei in route mode → esci
-  if (!routesVisible && activeRouteLayer) clearRouteMode();
+  // se nascondi i percorsi mentre sei in route mode -> esci
+  if (!Route.visible && Route.activeLayer) clearRouteMode();
 
   // aggiorna UI categorie se aperta
   updateLegendActiveState();
 }
+
+
 // ===== Modalità percorso =====
-const ROUTE_NEAR_METERS = 180; // POI entro 180m dal percorso restano “normali”
-let routePolylines = [];
-let activeRouteLayer = null;
+const Track = {
+  active: false,
+  watchId: null,
+  startMs: 0,
+  meters: 0,
+  lastLatLng: null,
+  uiTimer: null,
+  followUser: true,
+  didAutoCenter: false,
+  userMarker: null,
+  accCircle: null,
+};
 
-// ===== Tracking reale (GPS) =====
-let tracking = false;
-let watchId = null;
-let trackStartMs = 0;
-let trackMeters = 0;
-let lastLatLng = null;
-let uiTimer = null;
-let followUser = true;
-let didAutoCenter = false;
-let userMarker = null;
-let accCircle = null;
-let exitRouteCtrl = null;
-let routeInfoCtrl = null;
-let trackCtrl = null;
+const Geo = {
+  userLatLng: null,
+  locateMarker: null,
+  compassOn: false,
+};
 
-function formatHMS(ms){
+function formatHMS(ms) {
   const total = Math.floor(ms / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  return (h ? `${h}:` : "") + String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
+  return (h ? `${h}:` : "") + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
 }
 
-function getRouteLengthKm(layer){
+function getRouteLengthKm(layer) {
   const latlngs = layer.getLatLngs();
   const segs = Array.isArray(latlngs[0]) ? latlngs : [latlngs];
 
   let meters = 0;
-  for (const seg of segs){
-    for (let i = 1; i < seg.length; i++){
-      meters += seg[i-1].distanceTo(seg[i]);
+  for (const seg of segs) {
+    for (let i = 1; i < seg.length; i++) {
+      meters += seg[i - 1].distanceTo(seg[i]);
     }
   }
   return meters / 1000;
 }
 
-function estimateTimeMinutes(km, speedKmh){
+function estimateTimeMinutes(km, speedKmh) {
   return Math.round((km / speedKmh) * 60);
 }
 
-function ensureExitRouteBtn(){
-  if (exitRouteCtrl) return;
+const exitRouteControl = lazyControl("topright", "route-exit");
 
-  exitRouteCtrl = L.control({ position: "topright" });
-  exitRouteCtrl.onAdd = () => {
-    const div = L.DomUtil.create("div", "route-exit");
-    div.innerHTML = `<button type="button" class="route-exit-btn">Esci percorso</button>`;
-    L.DomEvent.disableClickPropagation(div);
-    div.querySelector("button").addEventListener("click", clearRouteMode);
-    return div;
-  };
-  exitRouteCtrl.addTo(map);
+function showExitRouteBtn(on) {
+  exitRouteControl.ensure(() =>
+    `<button type="button" class="route-exit-btn">Esci percorso</button>`
+  );
+  const btn = exitRouteControl.el()?.querySelector("button");
+  if (btn && !btn.__bound) {
+    btn.__bound = true;
+    btn.addEventListener("click", clearRouteMode);
+  }
+  toggle(exitRouteControl.el(), on);
 }
 
-function showExitRouteBtn(show){
-  ensureExitRouteBtn();
-  const el = document.querySelector(".route-exit");
-  if (el) el.style.display = show ? "" : "none";
+const routeInfoControl = lazyControl("topright", "route-info");
+
+function showRouteInfo(on, html) {
+  routeInfoControl.show(on, html);
 }
 
-function ensureRouteInfoUI(){
-  if (routeInfoCtrl) return;
+const trackControl = lazyControl("bottomleft", "track-box");
 
-  routeInfoCtrl = L.control({ position: "topright" });
-  routeInfoCtrl.onAdd = () => {
-    const div = L.DomUtil.create("div", "route-info");
-    L.DomEvent.disableClickPropagation(div);
-    return div;
-  };
-  routeInfoCtrl.addTo(map);
+function showTrackUI(on) {
+  trackControl.ensure(() => `
+    <div class="track-row">
+      <strong>Tracciamento</strong>
+      <button type="button" class="track-btn" data-act="toggle">Start</button>
+    </div>
+    <div class="track-metrics">
+      ⏱ <span data-t="time">00:00</span>
+      <span class="track-sep">•</span>
+      📏 <span data-t="dist">0.00</span> km
+    </div>
+  `);
+  const btn = trackControl.el()?.querySelector('[data-act="toggle"]');
+  if (btn && !btn.__bound) {
+    btn.__bound = true;
+    btn.addEventListener("click", handleTrackToggle);
+  }
+  toggle(trackControl.el(), on);
 }
 
-function showRouteInfo(show, html = ""){
-  ensureRouteInfoUI();
-  const el = document.querySelector(".route-info");
-  if (!el) return;
-  el.style.display = show ? "" : "none";
-  if (show) el.innerHTML = html;
-}
-
-function ensureTrackUI(){
-  if (trackCtrl) return;
-
-  trackCtrl = L.control({ position: "bottomleft" });
-  trackCtrl.onAdd = () => {
-    const div = L.DomUtil.create("div", "track-box");
-    div.innerHTML = `
-      <div class="track-row">
-        <strong>Tracciamento</strong>
-        <button type="button" class="track-btn" data-act="toggle">Start</button>
-      </div>
-      <div class="track-metrics">
-        ⏱ <span data-t="time">00:00</span>
-        <span class="track-sep">•</span>
-        📏 <span data-t="dist">0.00</span> km
-      </div>
-    `;
-    L.DomEvent.disableClickPropagation(div);
-
-div.querySelector('[data-act="toggle"]').addEventListener("click", () => {
-  if (!tracking) {
-    // quando inizi: nascondi la spiegazione e centra sul GPS
+function handleTrackToggle() {
+  if (!Track.active) {
     showRouteInfo(false);
     startTracking();
-
-    // appena parte, se hai già un fix recente centra subito
-    if (lastLatLng) map.setView(lastLatLng, 17, { animate: true });
-
+    if (Track.lastLatLng) map.setView(Track.lastLatLng, 17, { animate: true });
     return;
   }
 
-  // se sto tracciando ma NON sto seguendo (ho trascinato) → riaggancia
-  if (!followUser) {
-    followUser = true;
-    didAutoCenter = false;
-
-    if (lastLatLng) {
-      map.setView(lastLatLng, Math.max(map.getZoom(), 17), { animate: true });
-      didAutoCenter = true;
+  if (!Track.followUser) {
+    Track.followUser = true;
+    Track.didAutoCenter = false;
+    if (Track.lastLatLng) {
+      map.setView(Track.lastLatLng, Math.max(map.getZoom(), 17), { animate: true });
+      Track.didAutoCenter = true;
     }
     updateTrackUI();
     return;
   }
 
   stopTracking();
-});
-
-
-    return div;
-  };
-  trackCtrl.addTo(map);
 }
 
-function showTrackUI(show){
-  ensureTrackUI();
-  const el = document.querySelector(".track-box");
-  if (el) el.style.display = show ? "" : "none";
-}
-
-function updateTrackUI(){
-  const box = document.querySelector(".track-box");
+function updateTrackUI() {
+  const box = $(".track-box");
   if (!box) return;
 
-  const tEl = box.querySelector('[data-t="time"]');
-  const dEl = box.querySelector('[data-t="dist"]');
-  const btn = box.querySelector('[data-act="toggle"]');
+  const tEl = $('[data-t="time"]', box);
+  const dEl = $('[data-t="dist"]', box);
+  const btn = $('[data-act="toggle"]', box);
 
   const now = Date.now();
-  const elapsed = tracking ? now - trackStartMs : 0;
+  const elapsed = Track.active ? now - Track.startMs : 0;
 
-  if (tEl) tEl.textContent = tracking ? formatHMS(elapsed) : "00:00";
-  if (dEl) dEl.textContent = (trackMeters/1000).toFixed(2);
-  if (btn) btn.textContent = !tracking ? "Start" : (followUser ? "Stop" : "Centra");
+  if (tEl) tEl.textContent = Track.active ? formatHMS(elapsed) : "00:00";
+  if (dEl) dEl.textContent = (Track.meters / 1000).toFixed(2);
+  if (btn) btn.textContent = !Track.active ? "Start" : (Track.followUser ? "Stop" : "Centra");
 }
 
-function startTracking(){
-  if (!("geolocation" in navigator)){
+function startTracking() {
+  if (!("geolocation" in navigator)) {
     alert("Geolocalizzazione non supportata dal browser.");
     return;
   }
 
-  tracking = true;
-  trackStartMs = Date.now();
-  trackMeters = 0;
-  lastLatLng = null;
-followUser = true;
-didAutoCenter = false;
-  if (uiTimer) clearInterval(uiTimer);
-  uiTimer = setInterval(updateTrackUI, 1000);
+  Track.active = true;
+  Track.startMs = Date.now();
+  Track.meters = 0;
+  Track.lastLatLng = null;
+  Track.followUser = true;
+  Track.didAutoCenter = false;
+  if (Track.uiTimer) clearInterval(Track.uiTimer);
+  Track.uiTimer = setInterval(updateTrackUI, 1000);
 
-  watchId = navigator.geolocation.watchPosition(
+  Track.watchId = navigator.geolocation.watchPosition(
     (pos) => {
       const { latitude, longitude, accuracy } = pos.coords;
       const cur = L.latLng(latitude, longitude);
 
       // filtro: ignora GPS troppo impreciso
       if (accuracy && accuracy > 35) return;
-// SOLO freccia (stessa cosa del "pallino"): crea o aggiorna userLocateMarker
-if (!userLocateMarker){
-  userLocateMarker = L.marker(cur, { icon: userArrowIcon }).addTo(map);
-  enableCompassOnce(); // ruota la freccia (se permesso)
-} else {
-  userLocateMarker.setLatLng(cur);
-}
 
-// aggiorna anche userLatLng così distanze/“vicino a me” restano coerenti
-userLatLng = cur;
-
-
-
-// comportamento "Maps": al primo fix centra forte, poi segue con pan
-if (followUser){
-  if (!didAutoCenter){
-    map.setView(cur, Math.max(map.getZoom(), 17), { animate: true });
-    didAutoCenter = true;
-  } else {
-    map.panTo(cur, { animate: true });
-  }
-}
-      if (lastLatLng){
-        const d = lastLatLng.distanceTo(cur);
-        // ignora jitter sotto 10m
-        if (d >= 10) trackMeters += d;
+      // SOLO freccia (stessa cosa del "pallino"): crea o aggiorna Geo.locateMarker
+      if (!Geo.locateMarker) {
+        Geo.locateMarker = L.marker(cur, { icon: userArrowIcon }).addTo(map);
+        enableCompassOnce();
+      } else {
+        Geo.locateMarker.setLatLng(cur);
       }
 
-      lastLatLng = cur;
+      // aggiorna anche Geo.userLatLng così distanze/"vicino a me" restano coerenti
+      Geo.userLatLng = cur;
+
+      // comportamento "Maps": al primo fix centra forte, poi segue con pan
+      if (Track.followUser) {
+        if (!Track.didAutoCenter) {
+          map.setView(cur, Math.max(map.getZoom(), 17), { animate: true });
+          Track.didAutoCenter = true;
+        } else {
+          map.panTo(cur, { animate: true });
+        }
+      }
+
+      if (Track.lastLatLng) {
+        const d = Track.lastLatLng.distanceTo(cur);
+        // ignora jitter sotto 10m
+        if (d >= 10) Track.meters += d;
+      }
+
+      Track.lastLatLng = cur;
       updateTrackUI();
     },
     () => {
@@ -264,37 +275,37 @@ if (followUser){
   updateTrackUI();
 }
 
-function stopTracking(){
-  tracking = false;
+function stopTracking() {
+  Track.active = false;
 
-  if (watchId !== null){
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
+  if (Track.watchId !== null) {
+    navigator.geolocation.clearWatch(Track.watchId);
+    Track.watchId = null;
   }
-  if (uiTimer){
-    clearInterval(uiTimer);
-    uiTimer = null;
+  if (Track.uiTimer) {
+    clearInterval(Track.uiTimer);
+    Track.uiTimer = null;
   }
-if (userMarker){
-  map.removeLayer(userMarker);
-  userMarker = null;
-}
-if (accCircle){
-  map.removeLayer(accCircle);
-  accCircle = null;
-}
+  if (Track.userMarker) {
+    map.removeLayer(Track.userMarker);
+    Track.userMarker = null;
+  }
+  if (Track.accCircle) {
+    map.removeLayer(Track.accCircle);
+    Track.accCircle = null;
+  }
   updateTrackUI();
 }
 
 // distanza punto -> polilinea (metri) in WebMercator
-function pointToPolylineMeters(polyLayer, latlng){
+function pointToPolylineMeters(polyLayer, latlng) {
   const latlngs = polyLayer.getLatLngs();
   const segs = Array.isArray(latlngs[0]) ? latlngs : [latlngs];
 
   const crs = map.options.crs;
   const p = crs.project(latlng);
 
-  function distPointToSeg(p, a, b){
+  function distPointToSeg(p, a, b) {
     const vx = b.x - a.x, vy = b.y - a.y;
     const wx = p.x - a.x, wy = p.y - a.y;
 
@@ -311,9 +322,9 @@ function pointToPolylineMeters(polyLayer, latlng){
   }
 
   let best = Infinity;
-  for (const seg of segs){
-    for (let i = 1; i < seg.length; i++){
-      const a = crs.project(seg[i-1]);
+  for (const seg of segs) {
+    for (let i = 1; i < seg.length; i++) {
+      const a = crs.project(seg[i - 1]);
       const b = crs.project(seg[i]);
       best = Math.min(best, distPointToSeg(p, a, b));
     }
@@ -321,30 +332,30 @@ function pointToPolylineMeters(polyLayer, latlng){
   return best;
 }
 
-function applyRouteMode(routeLayer, routeName = "", routeDesc = ""){
-  activeRouteLayer = routeLayer;
-if (window.matchMedia("(max-width: 640px)").matches) setTopbarCollapsed(true);
+function applyRouteMode(routeLayer, routeName = "", routeDesc = "") {
+  Route.activeLayer = routeLayer;
+  if (window.matchMedia("(max-width: 640px)").matches) setTopbarCollapsed(true);
 
   // evidenzia percorso attivo, spegne gli altri
-  routePolylines.forEach(l => {
-    if (l === activeRouteLayer) l.setStyle({ weight: 7, opacity: 1 });
+  Route.polylines.forEach(l => {
+    if (l === Route.activeLayer) l.setStyle({ weight: 7, opacity: 1 });
     else l.setStyle({ weight: 4, opacity: 0.18 });
   });
 
   // zoom sul percorso
-  try { map.fitBounds(activeRouteLayer.getBounds(), { padding: [30, 30] }); } catch {}
+  try { map.fitBounds(Route.activeLayer.getBounds(), { padding: [30, 30] }); } catch {}
 
   // POI: tutti attenuati, ma quelli vicini restano normali
-  markers.forEach(m => {
+  State.markers.forEach(m => {
     const p = m.__poi;
     if (!p) return;
-    const d = pointToPolylineMeters(activeRouteLayer, L.latLng(p.lat, p.lon));
-    const near = d <= ROUTE_NEAR_METERS;
+    const d = pointToPolylineMeters(Route.activeLayer, L.latLng(p.lat, p.lon));
+    const near = d <= Route.NEAR_METERS;
     m.setOpacity(near ? 1 : 0.28);
   });
 
   // box info percorso (km + minuti stimati)
-  const km = getRouteLengthKm(activeRouteLayer);
+  const km = getRouteLengthKm(Route.activeLayer);
   const walkMin = estimateTimeMinutes(km, 3.5);
   const bikeMin = estimateTimeMinutes(km, 15);
 
@@ -364,15 +375,15 @@ if (window.matchMedia("(max-width: 640px)").matches) setTopbarCollapsed(true);
   updateTrackUI();
 }
 
-function clearRouteMode(){
-  activeRouteLayer = null;
-if (window.matchMedia("(max-width: 640px)").matches) setTopbarCollapsed(false);
+function clearRouteMode() {
+  Route.activeLayer = null;
+  if (window.matchMedia("(max-width: 640px)").matches) setTopbarCollapsed(false);
 
   // reset stile itinerari
-  routePolylines.forEach(l => l.setStyle({ weight: 5, opacity: 0.9 }));
+  Route.polylines.forEach(l => l.setStyle({ weight: 5, opacity: 0.9 }));
 
   // reset POI
-  markers.forEach(m => m.setOpacity(1));
+  State.markers.forEach(m => m.setOpacity(1));
 
   // nascondi box
   showExitRouteBtn(false);
@@ -383,38 +394,37 @@ if (window.matchMedia("(max-width: 640px)").matches) setTopbarCollapsed(false);
   stopTracking();
 }
 
+
 // ===== 2) Stato =====
-let allPois = [];
-let markers = [];
-let userLatLng = null;
-let userLocateMarker = null;
+const State = {
+  allPois: [],
+  markers: [],
+  activeCategory: "all",
+  activeTypes: new Set(["see"]),
+};
 
-let activeCategory = "all";
+const Favs = {
+  KEY: "caravaggio_favs_v1",
+  set: new Set(),
+  onlyActive: false,
+};
 
-// ===== Livelli (default: solo luoghi da vedere) =====
-let activeTypes = new Set(["see"]); // see | stories | hidden | lost | services
-
-
-// ===== Preferiti =====
-const FAV_KEY = "caravaggio_favs_v1";
-let favSet = new Set();
-let onlyFavs = false;
-
-function loadFavs(){
-  try{
-    const raw = localStorage.getItem(FAV_KEY);
+function loadFavs() {
+  try {
+    const raw = localStorage.getItem(Favs.KEY);
     if (!raw) return;
     const arr = JSON.parse(raw);
-    if (Array.isArray(arr)) favSet = new Set(arr);
-  } catch {}
-}
-function saveFavs(){
-  try{
-    localStorage.setItem(FAV_KEY, JSON.stringify([...favSet]));
+    if (Array.isArray(arr)) Favs.set = new Set(arr);
   } catch {}
 }
 
-function slugify(s){
+function saveFavs() {
+  try {
+    localStorage.setItem(Favs.KEY, JSON.stringify([...Favs.set]));
+  } catch {}
+}
+
+function slugify(s) {
   return String(s || "")
     .toLowerCase()
     .trim()
@@ -423,7 +433,7 @@ function slugify(s){
     .slice(0, 80);
 }
 
-function poiId(p){
+function poiId(p) {
   if (!p) return "";
   if (p.id) return String(p.id);
   const base = slugify(p.name);
@@ -432,150 +442,185 @@ function poiId(p){
   return `${base}-${lat}-${lon}`;
 }
 
-function isFav(p){ return favSet.has(poiId(p)); }
+function isFav(p) { return Favs.set.has(poiId(p)); }
 
-function toggleFav(p){
+function toggleFav(p) {
   const id = poiId(p);
   if (!id) return false;
-  if (favSet.has(id)) favSet.delete(id);
-  else favSet.add(id);
+  if (Favs.set.has(id)) Favs.set.delete(id);
+  else Favs.set.add(id);
   saveFavs();
-  return favSet.has(id);
+  return Favs.set.has(id);
 }
 
-// ===== 3) UI =====
-const searchInput = document.getElementById("searchInput");
-const clearSearchBtn = document.getElementById("clearSearch");
 
-const sidePanel = document.getElementById("sidePanel");
-const closePanel = document.getElementById("closePanel");
-const panelContent = document.getElementById("panelContent");
+// ===== 3) UI =====
+const searchInput = $("#searchInput");
+const clearSearchBtn = $("#clearSearch");
+
+const sidePanel = $("#sidePanel");
+const closePanel = $("#closePanel");
+const panelContent = $("#panelContent");
 
 // Header height (per drawer)
-const headerEl = document.querySelector(".topbar");
-function syncHeaderHeight(){
+const headerEl = $(".topbar");
+
+function syncHeaderHeight() {
   if (!headerEl) return;
   document.documentElement.style.setProperty("--header-h", headerEl.offsetHeight + "px");
 }
-const footerEl = document.querySelector(".footer");
-function syncFooterHeight(){
+
+const footerEl = $(".footer");
+
+function syncFooterHeight() {
   if (!footerEl) return;
   document.documentElement.style.setProperty("--footer-h", footerEl.offsetHeight + "px");
 }
+
 window.addEventListener("resize", syncFooterHeight);
 syncFooterHeight();
 
 window.addEventListener("resize", syncHeaderHeight);
 syncHeaderHeight();
+let fullHeaderH = headerEl ? headerEl.offsetHeight : 120;
 
-// ===== Topbar collassabile (mobile) =====
-const topbarToggle = document.getElementById("toggleTopbar");
+window.addEventListener("pageshow", (e) => {
+  if (e.persisted) {
+    syncHeaderHeight();
+    syncFooterHeight();
+    if (map) map.invalidateSize();
+  }
+});
 
-function setTopbarCollapsed(collapsed){
+
+// ===== Topbar collassabile =====
+const topbarToggle = $("#toggleTopbar");
+
+function setTopbarCollapsed(collapsed) {
   if (!headerEl) return;
-  headerEl.classList.toggle("is-collapsed", collapsed);
-document.body.classList.toggle("ui-hidden", collapsed);
 
-  if (topbarToggle){
+  if (!collapsed) {
+    // expanding: restore full height immediately so map doesn't get overlapped
+    document.documentElement.style.setProperty("--header-h", fullHeaderH + "px");
+  } else {
+    // collapsing: calculate target height (full minus controls + its margin) so map moves immediately
+    const controlsEl = headerEl.querySelector(".controls");
+    if (controlsEl) {
+      const mt = parseFloat(getComputedStyle(controlsEl).marginTop) || 0;
+      const targetH = fullHeaderH - controlsEl.offsetHeight - mt;
+      document.documentElement.style.setProperty("--header-h", targetH + "px");
+    }
+  }
+
+  headerEl.classList.toggle("is-collapsed", collapsed);
+  document.body.classList.toggle("ui-hidden", collapsed);
+
+  if (topbarToggle) {
     topbarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
     topbarToggle.textContent = collapsed ? "▴" : "▾";
     topbarToggle.setAttribute("aria-label", collapsed ? "Espandi pannello" : "Comprimi pannello");
   }
 
-  syncHeaderHeight();
-  setTimeout(() => map.invalidateSize(), 220);
+  // Sync after transition completes (max-height takes 250ms)
+  setTimeout(() => {
+    syncHeaderHeight();
+    map.invalidateSize();
+  }, 270);
 }
 
-if (topbarToggle){
+if (topbarToggle) {
   topbarToggle.addEventListener("click", () => {
     const isCollapsed = headerEl.classList.contains("is-collapsed");
     setTopbarCollapsed(!isCollapsed);
   });
 }
 
+
 // ===== Drawer helper (animazione leggera) =====
-function openDrawer(el){
+function openDrawer(el) {
   if (!el) return;
   el.classList.remove("hidden");
-  el.setAttribute("aria-hidden","false");
+  el.setAttribute("aria-hidden", "false");
   el.classList.remove("anim-in");
   requestAnimationFrame(() => el.classList.add("anim-in"));
 }
-function closeDrawer(el){
+
+function closeDrawer(el) {
   if (!el) return;
   el.classList.add("hidden");
-  el.setAttribute("aria-hidden","true");
+  el.setAttribute("aria-hidden", "true");
   el.classList.remove("anim-in");
 }
 
-// ===== Drawer livelli =====
-const toggleLevels = document.getElementById("toggleLevels");
-const levelsDrawer = document.getElementById("levelsDrawer");
-const closeLevels = document.getElementById("closeLevels");
-const levelsList = document.getElementById("levelsList");
-const toggleRoutes = document.getElementById("toggleRoutes");
 
-function openLevels(){
+// ===== Drawer livelli =====
+const toggleLevels = $("#toggleLevels");
+const levelsDrawer = $("#levelsDrawer");
+const closeLevels = $("#closeLevels");
+const levelsList = $("#levelsList");
+const toggleRoutes = $("#toggleRoutes");
+
+function openLevels() {
   openDrawer(levelsDrawer);
   syncLevelsUI();
   syncRoutesUI();
 }
-function closeLevelsDrawer(){ closeDrawer(levelsDrawer); }
+
+function closeLevelsDrawer() { closeDrawer(levelsDrawer); }
 
 if (toggleLevels) toggleLevels.addEventListener("click", () => {
   if (!levelsDrawer) return;
-  levelsDrawer.classList.contains("hidden") ? openLevels() : closeLevelsDrawer();
+  isHidden(levelsDrawer) ? openLevels() : closeLevelsDrawer();
 });
 if (closeLevels) closeLevels.addEventListener("click", closeLevelsDrawer);
 
-function syncRoutesUI(){
+function syncRoutesUI() {
   if (!toggleRoutes) return;
-  toggleRoutes.classList.toggle("active", routesVisible);
-  toggleRoutes.setAttribute("aria-pressed", routesVisible ? "true" : "false");
+  toggleRoutes.classList.toggle("active", Route.visible);
+  toggleRoutes.setAttribute("aria-pressed", Route.visible ? "true" : "false");
 }
 
-if (toggleRoutes){
+if (toggleRoutes) {
   toggleRoutes.addEventListener("click", () => {
-    setRoutesVisible(!routesVisible);
+    setRoutesVisible(!Route.visible);
     syncRoutesUI();
   });
 }
 
-function setLevel(mode){
-  // ✅ includi anche "services" quando scegli "Tutti"
-  if (mode === "all") activeTypes = new Set(["see","stories","hidden","lost",]);
-  else activeTypes = new Set([mode]);
+function setLevel(mode) {
+  // includi anche "services" quando scegli "Tutti"
+  if (mode === "all") State.activeTypes = new Set(["see", "stories", "hidden", "lost"]);
+  else State.activeTypes = new Set([mode]);
 
-  activeCategory = "all";
+  State.activeCategory = "all";
 
   closeLevelsDrawer();
   closeSidePanel();
 
-  // ✅ mostra disclaimer quando attivi "services"
+  // mostra disclaimer quando attivi "services"
   if (mode === "services") showServicesDisclaimer();
 
   buildLegend();
   renderMarkers({ shouldZoom: true });
 
-  if (nearbyDrawer && !nearbyDrawer.classList.contains("hidden")) renderNearbyList();
-  if (favsDrawer && !favsDrawer.classList.contains("hidden")) renderFavsList();
+  if (!isHidden(nearbyDrawer)) renderNearbyList();
+  if (!isHidden(favsDrawer)) renderFavsList();
 }
 
-
-function syncLevelsUI(){
+function syncLevelsUI() {
   if (!levelsList) return;
-  const chips = Array.from(levelsList.querySelectorAll(".level-chip"));
+  const chips = $$(".level-chip", levelsList);
 
-  const isAll = ["see","stories","hidden","lost","services"].every(x => activeTypes.has(x));
+  const isAll = ["see", "stories", "hidden", "lost", "services"].every(x => State.activeTypes.has(x));
   chips.forEach(ch => {
     const lv = ch.dataset.level;
     ch.classList.toggle("active",
-      (lv === "all" && isAll) || (lv !== "all" && !isAll && activeTypes.has(lv))
+      (lv === "all" && isAll) || (lv !== "all" && !isAll && State.activeTypes.has(lv))
     );
   });
 }
 
-if (levelsList){
+if (levelsList) {
   levelsList.addEventListener("click", (e) => {
     const btn = e.target.closest(".level-chip");
     if (!btn) return;
@@ -585,37 +630,38 @@ if (levelsList){
 
 
 // Drawer categorie
-const toggleCats = document.getElementById("toggleCats");
-const catsDrawer = document.getElementById("catsDrawer");
-const closeCats = document.getElementById("closeCats");
-const legendEl = document.getElementById("legend");
+const toggleCats = $("#toggleCats");
+const catsDrawer = $("#catsDrawer");
+const closeCats = $("#closeCats");
+const legendEl = $("#legend");
 
-function openCats(){ openDrawer(catsDrawer); }
-function closeCatsDrawer(){ closeDrawer(catsDrawer); }
+function openCats() { openDrawer(catsDrawer); }
+function closeCatsDrawer() { closeDrawer(catsDrawer); }
 
 if (toggleCats) toggleCats.addEventListener("click", () => {
   if (!catsDrawer) return;
-  catsDrawer.classList.contains("hidden") ? openCats() : closeCatsDrawer();
+  isHidden(catsDrawer) ? openCats() : closeCatsDrawer();
 });
 if (closeCats) closeCats.addEventListener("click", closeCatsDrawer);
 
 // Drawer vicini
-const toggleNearby = document.getElementById("toggleNearby");
-const nearbyDrawer = document.getElementById("nearbyDrawer");
-const closeNearby = document.getElementById("closeNearby");
-const nearbyList = document.getElementById("nearbyList");
-// Drawer preferiti: toggle "solo preferiti"
-const toggleOnlyFavsBtn = document.getElementById("toggleOnlyFavs");
+const toggleNearby = $("#toggleNearby");
+const nearbyDrawer = $("#nearbyDrawer");
+const closeNearby = $("#closeNearby");
+const nearbyList = $("#nearbyList");
 
-function syncOnlyFavsUI(){
+// Drawer preferiti: toggle "solo preferiti"
+const toggleOnlyFavsBtn = $("#toggleOnlyFavs");
+
+function syncOnlyFavsUI() {
   if (!toggleOnlyFavsBtn) return;
-  toggleOnlyFavsBtn.classList.toggle("active", onlyFavs);
-  toggleOnlyFavsBtn.setAttribute("aria-pressed", onlyFavs ? "true" : "false");
+  toggleOnlyFavsBtn.classList.toggle("active", Favs.onlyActive);
+  toggleOnlyFavsBtn.setAttribute("aria-pressed", Favs.onlyActive ? "true" : "false");
 }
 
-if (toggleOnlyFavsBtn){
+if (toggleOnlyFavsBtn) {
   toggleOnlyFavsBtn.addEventListener("click", () => {
-    onlyFavs = !onlyFavs;
+    Favs.onlyActive = !Favs.onlyActive;
 
     renderMarkers({ shouldZoom: true });
     renderFavsList();
@@ -625,7 +671,8 @@ if (toggleOnlyFavsBtn){
     syncOnlyFavsUI();
   });
 }
-const openGuide = document.getElementById("openGuide");
+
+const openGuide = $("#openGuide");
 
 if (openGuide) {
   openGuide.addEventListener("pointerup", (e) => {
@@ -634,13 +681,11 @@ if (openGuide) {
   }, { passive: false });
 }
 
-
-
-function openNearby(){
+function openNearby() {
   openDrawer(nearbyDrawer);
 
   // "Vicino a me" fa anche "Dove sono io?"
-  if (!userLatLng){
+  if (!Geo.userLatLng) {
     locateMe();
     return; // aspetta il callback del GPS, che poi aggiorna lista e marker
   }
@@ -648,32 +693,34 @@ function openNearby(){
   renderNearbyList();
 }
 
-function closeNearbyDrawer(){ closeDrawer(nearbyDrawer); }
+function closeNearbyDrawer() { closeDrawer(nearbyDrawer); }
 
 if (toggleNearby) toggleNearby.addEventListener("click", () => {
   if (!nearbyDrawer) return;
-  nearbyDrawer.classList.contains("hidden") ? openNearby() : closeNearbyDrawer();
+  isHidden(nearbyDrawer) ? openNearby() : closeNearbyDrawer();
 });
 if (closeNearby) closeNearby.addEventListener("click", closeNearbyDrawer);
 
 // Drawer preferiti
-const toggleFavs = document.getElementById("toggleFavs");
-const favsDrawer = document.getElementById("favsDrawer");
-const closeFavs = document.getElementById("closeFavs");
-const favsList = document.getElementById("favsList");
+const toggleFavs = $("#toggleFavs");
+const favsDrawer = $("#favsDrawer");
+const closeFavs = $("#closeFavs");
+const favsList = $("#favsList");
 
-function openFavs(){
+function openFavs() {
   openDrawer(favsDrawer);
   renderFavsList();
   syncOnlyFavsUI();
 }
-function closeFavsDrawer(){ closeDrawer(favsDrawer); }
+
+function closeFavsDrawer() { closeDrawer(favsDrawer); }
 
 if (toggleFavs) toggleFavs.addEventListener("click", () => {
   if (!favsDrawer) return;
-  favsDrawer.classList.contains("hidden") ? openFavs() : closeFavsDrawer();
+  isHidden(favsDrawer) ? openFavs() : closeFavsDrawer();
 });
 if (closeFavs) closeFavs.addEventListener("click", closeFavsDrawer);
+
 
 // ===== 4) Icone =====
 function makeIcon(url) {
@@ -695,7 +742,7 @@ const categoryIcons = {
   "Tesori nascosti": makeIcon("icons/tesorinascosti.png"),
   "Edifici": makeIcon("icons/edificio.png"),
   "DAE": makeIcon("icons/DAE.png"),
-  "Farmacia": makeIcon ("icons/farmacia.png"),
+  "Farmacia": makeIcon("icons/farmacia.png"),
   "Stazione del treno": makeIcon("icons/treno.png"),
   "Stazione del bus": makeIcon("icons/bus.png"),
   "Parcheggio": makeIcon("icons/parcheggio.png"),
@@ -715,7 +762,7 @@ const lostTypeIcons = {
 
 // Helper: normalizza type in modo robusto
 function normalizeType(t) {
-  return String(t || "").trim().toLowerCase(); // "lost" / "see"
+  return String(t || "").trim().toLowerCase();
 }
 
 // Questa è la funzione da usare quando crei i marker
@@ -723,7 +770,7 @@ function getIconForFeature(feature) {
   const categoria = feature?.properties?.categoria || feature?.properties?.category;
   const type = normalizeType(feature?.properties?.type);
 
-  // Se è "lost" e la categoria è tra quelle speciali → icona speciale
+  // Se è "lost" e la categoria è tra quelle speciali -> icona speciale
   if (type === "lost" && lostTypeIcons[categoria]) {
     return lostTypeIcons[categoria];
   }
@@ -734,66 +781,67 @@ function getIconForFeature(feature) {
 
 
 // ===== 5) Helpers =====
-function escapeHtml(str){
+function escapeHtml(str) {
   return String(str ?? "")
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function truncate(str, max = 220){
+function truncate(str, max = 220) {
   const s = String(str || "").trim();
   if (s.length <= max) return s;
-  return s.slice(0, max).trimEnd() + "…";
+  return s.slice(0, max).trimEnd() + "\u2026";
 }
 
-function distanceMetersTo(p){
-  if (!userLatLng) return null;
-  return userLatLng.distanceTo(L.latLng(p.lat, p.lon));
+function distanceMetersTo(p) {
+  if (!Geo.userLatLng) return null;
+  return Geo.userLatLng.distanceTo(L.latLng(p.lat, p.lon));
 }
 
-function getPrettyDistance(p){
+function getPrettyDistance(p) {
   const meters = distanceMetersTo(p);
   if (meters == null) return "";
   return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
 }
 
 // URL indicazioni Google Maps (se ho posizione: origine=io, altrimenti apre destinazione)
-function googleMapsDirectionsUrl(p){
+function googleMapsDirectionsUrl(p) {
   if (!p) return "#";
   const dest = `${p.lat},${p.lon}`;
-  if (userLatLng) {
-    const orig = `${userLatLng.lat},${userLatLng.lng}`;
+  if (Geo.userLatLng) {
+    const orig = `${Geo.userLatLng.lat},${Geo.userLatLng.lng}`;
     return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(orig)}&destination=${encodeURIComponent(dest)}&travelmode=walking`;
   }
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dest)}`;
 }
 
 // deep-link: set / clear parametro in URL
-function setPoiUrlParam(p){
+function setPoiUrlParam(p) {
   const id = poiId(p);
   if (!id) return;
   const url = new URL(window.location.href);
   url.searchParams.set("poi", id);
   history.replaceState({}, "", url.toString());
 }
-function clearPoiUrlParam(){
+
+function clearPoiUrlParam() {
   const url = new URL(window.location.href);
   url.searchParams.delete("poi");
   history.replaceState({}, "", url.toString());
 }
 
-async function copyLinkForPoi(p){
+async function copyLinkForPoi(p) {
   const id = poiId(p);
   if (!id) return;
   const url = new URL(window.location.href);
   url.searchParams.set("poi", id);
   const text = url.toString();
 
-  try{
-    if (navigator.clipboard && navigator.clipboard.writeText){
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
       alert("Link copiato negli appunti.");
     } else {
@@ -804,8 +852,9 @@ async function copyLinkForPoi(p){
   }
 }
 
+
 // ===== 6) Side panel + Slider =====
-function openPanel(p, distancePretty){
+function openPanel(p, distancePretty) {
   if (!sidePanel || !panelContent) return;
 
   if (window.matchMedia("(max-width: 640px)").matches) setTopbarCollapsed(true);
@@ -814,19 +863,19 @@ function openPanel(p, distancePretty){
   const sliderHtml = imgs.length
     ? `
       <div class="slider" data-slider>
-        <button class="slider-btn prev" type="button" aria-label="Foto precedente">‹</button>
-        <button class="slider-btn next" type="button" aria-label="Foto successiva">›</button>
+        <button class="slider-btn prev" type="button" aria-label="Foto precedente">&#8249;</button>
+        <button class="slider-btn next" type="button" aria-label="Foto successiva">&#8250;</button>
 
         <div class="slider-track" data-track>
           ${imgs.map((src, i) => `
             <div class="slide">
-              <img src="${src}" alt="${escapeHtml(p.name)} (${i+1})" data-open-lightbox="${i}">
+              <img src="${src}" alt="${escapeHtml(p.name)} (${i + 1})" data-open-lightbox="${i}">
             </div>
           `).join("")}
         </div>
 
         <div class="slider-dots" data-dots>
-          ${imgs.map((_, i) => `<span class="slider-dot ${i===0 ? "active": ""}" data-dot="${i}"></span>`).join("")}
+          ${imgs.map((_, i) => `<span class="slider-dot ${i === 0 ? "active" : ""}" data-dot="${i}"></span>`).join("")}
         </div>
       </div>
     `
@@ -835,7 +884,6 @@ function openPanel(p, distancePretty){
   const directionsUrl = googleMapsDirectionsUrl(p);
   const fav = isFav(p);
 
-  // ✅ HTML puro qui dentro (niente JS dentro la stringa)
   panelContent.innerHTML = `
     <div class="panel-title">${escapeHtml(p.name)}</div>
     <div class="badge">${escapeHtml(p.category)}</div>
@@ -847,26 +895,26 @@ function openPanel(p, distancePretty){
 
       <button class="icon-btn" type="button" data-fav-act="toggle"
         aria-label="${fav ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"}"
-        aria-pressed="${fav ? "true":"false"}">
-        ${fav ? "★" : "☆"}
+        aria-pressed="${fav ? "true" : "false"}">
+        ${fav ? "\u2605" : "\u2606"}
       </button>
 
-      <button class="icon-btn" type="button" data-share-act="copy" aria-label="Copia link">🔗</button>
+      <button class="icon-btn" type="button" data-share-act="copy" aria-label="Copia link">\uD83D\uDD17</button>
     </div>
 
     <div class="panel-text" id="panelText"></div>
 
-    ${distancePretty ? `<div class="panel-distance">📍 Distanza: <strong>${escapeHtml(distancePretty)}</strong></div>` : ""}
+    ${distancePretty ? `<div class="panel-distance">\uD83D\uDCCD Distanza: <strong>${escapeHtml(distancePretty)}</strong></div>` : ""}
   `;
 
-  // ✅ Markdown sicuro: escape HTML -> parse -> sanitize -> render
-  const panelText = document.getElementById("panelText");
+  // Markdown sicuro: escape HTML -> parse -> sanitize -> render
+  const panelText = $("#panelText");
   const raw = p.long || p.short || "";
 
-  const escaped = escapeHtml(raw);              // 1) escape HTML
-  const parsed = marked.parse(escaped);         // 2) Markdown → HTML
-  const safeHtml = DOMPurify.sanitize(parsed);  // 3) sanitizza HTML
-  panelText.innerHTML = safeHtml;               // 4) inserisci nel pannello
+  const escaped = escapeHtml(raw);
+  const parsed = marked.parse(escaped);
+  const safeHtml = DOMPurify.sanitize(parsed);
+  panelText.innerHTML = safeHtml;
 
   sidePanel.classList.remove("hidden");
   sidePanel.setAttribute("aria-hidden", "false");
@@ -875,21 +923,21 @@ function openPanel(p, distancePretty){
   sidePanel.classList.remove("anim-in");
   requestAnimationFrame(() => sidePanel.classList.add("anim-in"));
 
-  const favBtn = panelContent.querySelector('[data-fav-act="toggle"]');
-  if (favBtn){
+  const favBtn = $('[data-fav-act="toggle"]', panelContent);
+  if (favBtn) {
     favBtn.addEventListener("click", () => {
       const nowFav = toggleFav(p);
-      favBtn.textContent = nowFav ? "★" : "☆";
+      favBtn.textContent = nowFav ? "\u2605" : "\u2606";
       favBtn.setAttribute("aria-pressed", nowFav ? "true" : "false");
       favBtn.setAttribute("aria-label", nowFav ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti");
 
-      if (favsDrawer && !favsDrawer.classList.contains("hidden")) renderFavsList();
-      if (nearbyDrawer && !nearbyDrawer.classList.contains("hidden")) renderNearbyList();
+      if (!isHidden(favsDrawer)) renderFavsList();
+      if (!isHidden(nearbyDrawer)) renderNearbyList();
     });
   }
 
-  const shareBtn = panelContent.querySelector('[data-share-act="copy"]');
-  if (shareBtn){
+  const shareBtn = $('[data-share-act="copy"]', panelContent);
+  if (shareBtn) {
     shareBtn.addEventListener("click", () => copyLinkForPoi(p));
   }
 
@@ -897,7 +945,7 @@ function openPanel(p, distancePretty){
   setPoiUrlParam(p);
 }
 
-function closeSidePanel(){
+function closeSidePanel() {
   if (!sidePanel) return;
   sidePanel.classList.add("hidden");
   sidePanel.setAttribute("aria-hidden", "true");
@@ -910,7 +958,7 @@ if (closePanel) closePanel.addEventListener("click", closeSidePanel);
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   // se lightbox aperto, gestisce lui (vedi sotto)
-  if (lightbox && !lightbox.classList.contains("hidden")) return;
+  if (!isHidden(lightbox)) return;
   closeSidePanel();
   closeCatsDrawer();
   closeNearbyDrawer();
@@ -918,23 +966,23 @@ document.addEventListener("keydown", (e) => {
 });
 
 // Slider behavior (scroll-snap + pallini + frecce + click immagine)
-function setupSliderAndLightbox(imgs, title){
-  const slider = panelContent.querySelector("[data-slider]");
+function setupSliderAndLightbox(imgs, title) {
+  const slider = $("[data-slider]", panelContent);
   if (!slider || !imgs || imgs.length === 0) return;
 
-  const track = slider.querySelector("[data-track]");
-  const dotsWrap = slider.querySelector("[data-dots]");
-  const btnPrev = slider.querySelector(".slider-btn.prev");
-  const btnNext = slider.querySelector(".slider-btn.next");
+  const track = $("[data-track]", slider);
+  const dotsWrap = $("[data-dots]", slider);
+  const btnPrev = $(".slider-btn.prev", slider);
+  const btnNext = $(".slider-btn.next", slider);
   if (!track || !dotsWrap) return;
 
-  const dots = Array.from(dotsWrap.querySelectorAll("[data-dot]"));
+  const dots = $$("[data-dot]", dotsWrap);
 
-  function setActiveDot(i){
+  function setActiveDot(i) {
     dots.forEach((d, idx) => d.classList.toggle("active", idx === i));
   }
 
-  function scrollToIndex(i){
+  function scrollToIndex(i) {
     const w = track.clientWidth;
     track.scrollTo({ left: i * (w + 10), behavior: "smooth" });
     setActiveDot(i);
@@ -961,7 +1009,7 @@ function setupSliderAndLightbox(imgs, title){
 
   dots.forEach(d => d.addEventListener("click", () => scrollToIndex(Number(d.dataset.dot))));
 
-  slider.querySelectorAll("[data-open-lightbox]").forEach(imgEl => {
+  $$("[data-open-lightbox]", slider).forEach(imgEl => {
     imgEl.style.cursor = "zoom-in";
     imgEl.addEventListener("click", () => {
       const i = Number(imgEl.dataset.openLightbox);
@@ -970,38 +1018,38 @@ function setupSliderAndLightbox(imgs, title){
   });
 }
 
+
 // ===== 7) Markers =====
 function clearMarkers() {
-  markers.forEach(m => m.remove());
-  markers = [];
+  State.markers.forEach(m => m.remove());
+  State.markers = [];
 }
 
 function computeFiltered() {
   const q = searchInput ? searchInput.value.trim().toLowerCase() : "";
 
-  return allPois.filter(p => {
+  return State.allPois.filter(p => {
     const t = (p.type || "see");
-    const matchType = activeTypes.has(t);
+    const matchType = State.activeTypes.has(t);
 
-    const matchCat = (activeCategory === "all") || (p.category === activeCategory);
+    const matchCat = (State.activeCategory === "all") || (p.category === State.activeCategory);
 
     const hay = `${p.name} ${p.short || ""} ${p.long || ""}`.toLowerCase();
     const matchQ = !q || hay.includes(q);
-const matchFav = !onlyFavs || favSet.has(poiId(p));
+    const matchFav = !Favs.onlyActive || Favs.set.has(poiId(p));
     return matchType && matchCat && matchQ && matchFav;
   });
 }
 
-
 function zoomToVisibleMarkers() {
-  if (markers.length === 0) return;
+  if (State.markers.length === 0) return;
 
-  if (markers.length === 1) {
-    map.setView(markers[0].getLatLng(), 17, { animate: true });
+  if (State.markers.length === 1) {
+    map.setView(State.markers[0].getLatLng(), 17, { animate: true });
     return;
   }
 
-  const group = L.featureGroup(markers);
+  const group = L.featureGroup(State.markers);
   map.fitBounds(group.getBounds(), { padding: [30, 30], animate: true });
 }
 
@@ -1012,55 +1060,51 @@ function renderMarkers({ shouldZoom = false } = {}) {
 
   filtered.forEach(p => {
     const pretty = getPrettyDistance(p);
-   const icon = getIconForFeature({
-  properties: {
-    categoria: p.category,
-    type: p.type
-  }
-});
-
+    const icon = getIconForFeature({
+      properties: {
+        categoria: p.category,
+        type: p.type
+      }
+    });
 
     const m = L.marker([p.lat, p.lon], { icon }).addTo(map);
     m.__poi = p;
     m.on("click", () => openPanel(p, pretty));
-    markers.push(m);
+    State.markers.push(m);
   });
 
   if (shouldZoom) zoomToVisibleMarkers();
 
   // se sei in modalità percorso e cambi filtri: riapplica opacità coerente
-  if (activeRouteLayer){
-    markers.forEach(m => {
+  if (Route.activeLayer) {
+    State.markers.forEach(m => {
       const p = m.__poi;
       if (!p) return;
-      const d = pointToPolylineMeters(activeRouteLayer, L.latLng(p.lat, p.lon));
-      const near = d <= ROUTE_NEAR_METERS;
+      const d = pointToPolylineMeters(Route.activeLayer, L.latLng(p.lat, p.lon));
+      const near = d <= Route.NEAR_METERS;
       m.setOpacity(near ? 1 : 0.28);
     });
   }
 
   // aggiorna liste se aperte
-  if (nearbyDrawer && !nearbyDrawer.classList.contains("hidden")) renderNearbyList();
-  if (favsDrawer && !favsDrawer.classList.contains("hidden")) renderFavsList();
+  if (!isHidden(nearbyDrawer)) renderNearbyList();
+  if (!isHidden(favsDrawer)) renderFavsList();
 }
 
+
 // ===== 8) Legenda categorie (drawer) =====
-function updateLegendActiveState(){
+function updateLegendActiveState() {
   if (!legendEl) return;
 
-  legendEl.querySelectorAll(".legend-item").forEach(el => {
-
-  
-
-    // comportamento normale: categorie POI
+  $$(".legend-item", legendEl).forEach(el => {
     el.classList.toggle(
       "active",
-      activeCategory !== "all" && el.dataset.cat === activeCategory
+      State.activeCategory !== "all" && el.dataset.cat === State.activeCategory
     );
   });
 }
 
-function buildLegend(){
+function buildLegend() {
   if (!legendEl) return;
   legendEl.innerHTML = "";
 
@@ -1070,7 +1114,7 @@ function buildLegend(){
     counts[p.category] = (counts[p.category] || 0) + 1;
   });
 
-  const cats = Object.keys(counts).sort((a,b) => a.localeCompare(b, "it"));
+  const cats = Object.keys(counts).sort((a, b) => a.localeCompare(b, "it"));
 
   L.DomEvent.disableClickPropagation(legendEl);
   L.DomEvent.disableScrollPropagation(legendEl);
@@ -1093,15 +1137,13 @@ function buildLegend(){
       <div class="legend-count">${counts[cat] || 0}</div>
     `;
 
-  row.addEventListener("click", () => {
-  activeCategory = (activeCategory === cat) ? "all" : cat;
-
-
-  closeCatsDrawer();
-  closeSidePanel();
-  renderMarkers({ shouldZoom: true });
-  updateLegendActiveState();
-});
+    row.addEventListener("click", () => {
+      State.activeCategory = (State.activeCategory === cat) ? "all" : cat;
+      closeCatsDrawer();
+      closeSidePanel();
+      renderMarkers({ shouldZoom: true });
+      updateLegendActiveState();
+    });
 
     legendEl.appendChild(row);
   });
@@ -1111,75 +1153,63 @@ function buildLegend(){
 
 
 // ===== 9) Vicino a me =====
-function poiCardHtml(p){
+function poiCardHtml(p, { compact = false } = {}) {
   const d = getPrettyDistance(p);
   const fav = isFav(p);
+  const cls = compact ? "poi-card poi-card--fav" : "poi-card";
 
   return `
-    <div class="poi-card" data-poi="${escapeHtml(poiId(p))}">
+    <div class="${cls}" data-poi="${escapeHtml(poiId(p))}">
       <div class="poi-top">
         <div class="t">${escapeHtml(p.name)}</div>
         <button class="fav-mini" type="button"
           aria-label="${fav ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"}"
-          aria-pressed="${fav ? "true":"false"}">${fav ? "★" : "☆"}</button>
+          aria-pressed="${fav ? "true" : "false"}">${fav ? "\u2605" : "\u2606"}</button>
       </div>
-      <div class="s">${escapeHtml(p.category || "")}${d ? ` • ${escapeHtml(d)}` : ""}</div>
-      <div class="m">${escapeHtml(truncate(p.short || p.long || "", 110))}</div>
-    </div>
-  `;
-}
-function favCardHtml(p){
-  const d = getPrettyDistance(p);
-  const fav = isFav(p);
-
-  return `
-    <div class="poi-card poi-card--fav" data-poi="${escapeHtml(poiId(p))}">
-      <div class="poi-top">
-        <div class="t">${escapeHtml(p.name)}</div>
-        <button class="fav-mini" type="button"
-          aria-label="${fav ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"}"
-          aria-pressed="${fav ? "true":"false"}">${fav ? "★" : "☆"}</button>
-      </div>
-      ${d ? `<div class="s">${escapeHtml(d)}</div>` : ""}
+      ${compact
+        ? (d ? `<div class="s">${escapeHtml(d)}</div>` : "")
+        : `<div class="s">${escapeHtml(p.category || "")}${d ? ` \u2022 ${escapeHtml(d)}` : ""}</div>
+           <div class="m">${escapeHtml(truncate(p.short || p.long || "", 110))}</div>`
+      }
     </div>
   `;
 }
 
-function bindPoiCardActions(container){
+function bindPoiCardActions(container) {
   if (!container) return;
 
-  container.querySelectorAll(".poi-card").forEach(card => {
+  $$(".poi-card", container).forEach(card => {
     const id = card.dataset.poi;
-    const p = allPois.find(x => poiId(x) === id);
+    const p = State.allPois.find(x => poiId(x) === id);
     if (!p) return;
 
     card.addEventListener("click", (e) => {
       if (e.target && e.target.closest(".fav-mini")) return;
-      map.setView([p.lat, p.lon], 17, { animate:true });
+      map.setView([p.lat, p.lon], 17, { animate: true });
       openPanel(p, getPrettyDistance(p));
     });
 
-    const favBtn = card.querySelector(".fav-mini");
-    if (favBtn){
+    const favBtn = $(".fav-mini", card);
+    if (favBtn) {
       favBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const nowFav = toggleFav(p);
-        favBtn.textContent = nowFav ? "★" : "☆";
+        favBtn.textContent = nowFav ? "\u2605" : "\u2606";
         favBtn.setAttribute("aria-pressed", nowFav ? "true" : "false");
         favBtn.setAttribute("aria-label", nowFav ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti");
-        if (favsDrawer && !favsDrawer.classList.contains("hidden")) renderFavsList();
+        if (!isHidden(favsDrawer)) renderFavsList();
       });
     }
   });
 }
 
-function renderNearbyList(){
+function renderNearbyList() {
   if (!nearbyList) return;
 
-  if (!userLatLng){
+  if (!Geo.userLatLng) {
     nearbyList.innerHTML = `
       <div class="hint-box">
-        Per vedere cosa c’è vicino, premi <strong>Dove sono io?</strong>.
+        Per vedere cosa c'è vicino, premi <strong>Dove sono io?</strong>.
       </div>
     `;
     return;
@@ -1189,10 +1219,10 @@ function renderNearbyList(){
   const withDist = filtered
     .map(p => ({ p, d: distanceMetersTo(p) }))
     .filter(x => x.d != null)
-    .sort((a,b) => a.d - b.d)
+    .sort((a, b) => a.d - b.d)
     .slice(0, 20);
 
-  if (withDist.length === 0){
+  if (withDist.length === 0) {
     nearbyList.innerHTML = `<div class="hint-box">Nessun luogo trovato con i filtri attuali.</div>`;
     return;
   }
@@ -1201,56 +1231,54 @@ function renderNearbyList(){
   bindPoiCardActions(nearbyList);
 }
 
+
 // ===== 10) Preferiti =====
-function renderFavsList(){
+function renderFavsList() {
   if (!favsList) return;
 
-  const favPois = allPois.filter(p => favSet.has(poiId(p)));
+  const favPois = State.allPois.filter(p => Favs.set.has(poiId(p)));
 
-  if (favPois.length === 0){
+  if (favPois.length === 0) {
     favsList.innerHTML = `<div class="hint-box">Nessun preferito salvato.</div>`;
     return;
   }
 
   let sorted = [...favPois];
-  if (userLatLng){
-    sorted.sort((a,b) => (distanceMetersTo(a) ?? 1e12) - (distanceMetersTo(b) ?? 1e12));
+  if (Geo.userLatLng) {
+    sorted.sort((a, b) => (distanceMetersTo(a) ?? 1e12) - (distanceMetersTo(b) ?? 1e12));
   } else {
-    sorted.sort((a,b) => String(a.name).localeCompare(String(b.name), "it"));
+    sorted.sort((a, b) => String(a.name).localeCompare(String(b.name), "it"));
   }
 
-  favsList.innerHTML = sorted.map(p => favCardHtml(p)).join("");
+  favsList.innerHTML = sorted.map(p => poiCardHtml(p, { compact: true })).join("");
   bindPoiCardActions(favsList);
 }
 
-// ===== 11) Geolocalizzazione =====
 
+// ===== 11) Geolocalizzazione =====
 const userArrowIcon = L.divIcon({
   className: "user-arrow",
-  html: "➤",
+  html: "\u27A4",
   iconSize: [32, 32],
   iconAnchor: [16, 16]
 });
 
-let compassOn = false;
-
-function enableCompassOnce(){
-  if (compassOn) return;
+function enableCompassOnce() {
+  if (Geo.compassOn) return;
 
   const start = () => {
-    compassOn = true;
+    Geo.compassOn = true;
 
-    // usa absolute quando c'è, ma su alcuni device arriva solo "deviceorientation"
     const handler = (e) => {
-  if (!userLocateMarker) return;
+      if (!Geo.locateMarker) return;
 
-  const alpha = (e && typeof e.alpha === "number") ? e.alpha : null;
-  if (alpha == null) return;
+      const alpha = (e && typeof e.alpha === "number") ? e.alpha : null;
+      if (alpha == null) return;
 
-  const heading = 360 - alpha;
-  const el = userLocateMarker.getElement();
-  if (el) el.style.transform = `rotate(${heading}deg)`;
-};
+      const heading = 360 - alpha;
+      const el = Geo.locateMarker.getElement();
+      if (el) el.style.transform = `rotate(${heading}deg)`;
+    };
 
     window.addEventListener("deviceorientationabsolute", handler, true);
     window.addEventListener("deviceorientation", handler, true);
@@ -1276,25 +1304,22 @@ function locateMe() {
   navigator.geolocation.getCurrentPosition(
     pos => {
       const { latitude, longitude } = pos.coords;
-      userLatLng = L.latLng(latitude, longitude);
+      Geo.userLatLng = L.latLng(latitude, longitude);
 
       map.setView([latitude, longitude], 16, { animate: true });
 
       // evita frecce duplicate
-      if (!userLocateMarker){
-  userLocateMarker = L.marker([latitude, longitude], { icon: userArrowIcon }).addTo(map);
-  enableCompassOnce();
-} else {
-  userLocateMarker.setLatLng([latitude, longitude]);
-}
-
-      // attiva bussola UNA sola volta
-      enableCompassOnce();
+      if (!Geo.locateMarker) {
+        Geo.locateMarker = L.marker([latitude, longitude], { icon: userArrowIcon }).addTo(map);
+        enableCompassOnce();
+      } else {
+        Geo.locateMarker.setLatLng([latitude, longitude]);
+      }
 
       // niente popup "fastidioso": solo marker
       renderMarkers(); // aggiorna distanze
-      if (nearbyDrawer && !nearbyDrawer.classList.contains("hidden")) renderNearbyList();
-      if (favsDrawer && !favsDrawer.classList.contains("hidden")) renderFavsList();
+      if (!isHidden(nearbyDrawer)) renderNearbyList();
+      if (!isHidden(favsDrawer)) renderFavsList();
     },
     () => alert("Posizione non disponibile (permesso negato o segnale debole).")
   );
@@ -1302,7 +1327,7 @@ function locateMe() {
 
 
 // ===== 12) Search: X interna =====
-function syncClearBtn(){
+function syncClearBtn() {
   if (!clearSearchBtn || !searchInput) return;
   const has = !!searchInput.value.trim();
   clearSearchBtn.style.opacity = has ? "1" : "0";
@@ -1310,7 +1335,7 @@ function syncClearBtn(){
   clearSearchBtn.setAttribute("aria-hidden", has ? "false" : "true");
 }
 
-if (searchInput){
+if (searchInput) {
   searchInput.addEventListener("input", () => {
     closeSidePanel();
     renderMarkers();
@@ -1319,7 +1344,7 @@ if (searchInput){
   });
 }
 
-if (clearSearchBtn && searchInput){
+if (clearSearchBtn && searchInput) {
   clearSearchBtn.addEventListener("click", () => {
     searchInput.value = "";
     syncClearBtn();
@@ -1332,12 +1357,13 @@ if (clearSearchBtn && searchInput){
 
 syncClearBtn();
 
+
 // ===== 13) Init =====
 async function init() {
   loadFavs();
 
   const res = await fetch("poi.json");
-  allPois = await res.json();
+  State.allPois = await res.json();
 
   buildLegend();
   renderMarkers();
@@ -1345,9 +1371,9 @@ async function init() {
   // deep-link: ?poi=
   const url = new URL(window.location.href);
   const poiParam = url.searchParams.get("poi");
-  if (poiParam){
-    const p = allPois.find(x => poiId(x) === poiParam);
-    if (p){
+  if (poiParam) {
+    const p = State.allPois.find(x => poiId(x) === poiParam);
+    if (p) {
       map.setView([p.lat, p.lon], 17, { animate: false });
       openPanel(p, getPrettyDistance(p));
     }
@@ -1358,6 +1384,7 @@ async function init() {
 }
 
 init();
+
 
 // ===== Carica Itinerari =====
 const palette = [
@@ -1370,7 +1397,7 @@ const palette = [
 const colorByName = new Map();
 let colorIndex = 0;
 
-function getColorForName(name){
+function getColorForName(name) {
   if (colorByName.has(name)) return colorByName.get(name);
   const c = palette[colorIndex % palette.length];
   colorByName.set(name, c);
@@ -1378,37 +1405,37 @@ function getColorForName(name){
   return c;
 }
 
-async function loadItinerari(){
-  try{
+async function loadItinerari() {
+  try {
     const res = await fetch("itinerari.geojson", { cache: "no-store" });
     if (!res.ok) throw new Error("Impossibile caricare itinerari.geojson");
     const geo = await res.json();
 
-    if (itinerariLayer) itinerariLayer.remove();
+    if (Route.itinerariLayer) Route.itinerariLayer.remove();
 
     // reset route mode storage
-    routePolylines = [];
-    activeRouteLayer = null;
+    Route.polylines = [];
+    Route.activeLayer = null;
     showExitRouteBtn(false);
     showRouteInfo(false);
     showTrackUI(false);
     stopTracking();
 
-    itinerariLayer = L.geoJSON(geo, {
+    Route.itinerariLayer = L.geoJSON(geo, {
       pane: "routesPane",
 
       // stile linee (colori stabili per nome)
       style: (f) => {
-  const t = f.geometry?.type;
-  if (t !== "LineString" && t !== "MultiLineString") return null;
+        const t = f.geometry?.type;
+        if (t !== "LineString" && t !== "MultiLineString") return null;
 
-  const name = String(
-    f.properties?.name || f.properties?.Nome || f.properties?.title || "Itinerario"
-  );
+        const name = String(
+          f.properties?.name || f.properties?.Nome || f.properties?.title || "Itinerario"
+        );
 
-  const color = getColorForName(name);
-  return { color, weight: 5, opacity: 0.9 };
-},
+        const color = getColorForName(name);
+        return { color, weight: 5, opacity: 0.9 };
+      },
 
       // punti pericolosi come cerchi rossi (sotto ai marker)
       pointToLayer: (f, latlng) => {
@@ -1432,7 +1459,6 @@ async function loadItinerari(){
             f.properties?.title ||
             "Punto pericoloso";
 
-          // popup minimo (solo tap), non invasivo
           layer.bindPopup(`<strong>${escapeHtml(name)}</strong>`, { autoPan: true });
         }
 
@@ -1449,37 +1475,40 @@ async function loadItinerari(){
             f.properties?.short ||
             "";
 
-          routePolylines.push(layer);
+          Route.polylines.push(layer);
           layer.on("click", () => applyRouteMode(layer, name, desc));
         }
       }
-});
+    });
 
-if (routesVisible) itinerariLayer.addTo(map);
+    if (Route.visible) Route.itinerariLayer.addTo(map);
 
-  } catch(err){
+  } catch (err) {
     console.warn(err);
   }
 }
 
+
 // ===== Lightbox (fullscreen) =====
-const lightbox = document.getElementById("lightbox");
-const lbImg = document.getElementById("lbImg");
-const lbClose = document.getElementById("lbClose");
-const lbPrev = document.getElementById("lbPrev");
-const lbNext = document.getElementById("lbNext");
-const lbCounter = document.getElementById("lbCounter");
+const lightbox = $("#lightbox");
+const lbImg = $("#lbImg");
+const lbClose = $("#lbClose");
+const lbPrev = $("#lbPrev");
+const lbNext = $("#lbNext");
+const lbCounter = $("#lbCounter");
 
-let lbImgs = [];
-let lbIndex = 0;
-let lbTitle = "";
+const Lb = {
+  imgs: [],
+  index: 0,
+  title: "",
+};
 
-function openLightbox(imgs, startIndex = 0, title = ""){
+function openLightbox(imgs, startIndex = 0, title = "") {
   if (!lightbox || !lbImg) return;
 
-  lbImgs = imgs;
-  lbIndex = startIndex;
-  lbTitle = title;
+  Lb.imgs = imgs;
+  Lb.index = startIndex;
+  Lb.title = title;
 
   lightbox.classList.remove("hidden");
   lightbox.setAttribute("aria-hidden", "false");
@@ -1488,35 +1517,35 @@ function openLightbox(imgs, startIndex = 0, title = ""){
   renderLightbox();
 }
 
-function closeLightbox(){
+function closeLightbox() {
   if (!lightbox) return;
   lightbox.classList.add("hidden");
   lightbox.setAttribute("aria-hidden", "true");
   document.body.style.overflow = "";
 }
 
-function renderLightbox(){
+function renderLightbox() {
   if (!lbImg) return;
-  const total = lbImgs.length;
-  const src = lbImgs[lbIndex];
+  const total = Lb.imgs.length;
+  const src = Lb.imgs[Lb.index];
 
   lbImg.src = src;
-  lbImg.alt = lbTitle ? `${lbTitle} (${lbIndex+1}/${total})` : `Foto ${lbIndex+1}/${total}`;
+  lbImg.alt = Lb.title ? `${Lb.title} (${Lb.index + 1}/${total})` : `Foto ${Lb.index + 1}/${total}`;
 
-  if (lbCounter) lbCounter.textContent = `${lbIndex + 1}/${total}`;
-  if (lbPrev) lbPrev.style.display = total > 1 ? "" : "none";
-  if (lbNext) lbNext.style.display = total > 1 ? "" : "none";
+  if (lbCounter) lbCounter.textContent = `${Lb.index + 1}/${total}`;
+  toggle(lbPrev, total > 1);
+  toggle(lbNext, total > 1);
 }
 
-function lbSetIndex(i){
-  const total = lbImgs.length;
-  lbIndex = (i + total) % total;
+function lbSetIndex(i) {
+  const total = Lb.imgs.length;
+  Lb.index = (i + total) % total;
   renderLightbox();
 }
 
 if (lbClose) lbClose.addEventListener("click", closeLightbox);
-if (lbPrev) lbPrev.addEventListener("click", () => lbSetIndex(lbIndex - 1));
-if (lbNext) lbNext.addEventListener("click", () => lbSetIndex(lbIndex + 1));
+if (lbPrev) lbPrev.addEventListener("click", () => lbSetIndex(Lb.index - 1));
+if (lbNext) lbNext.addEventListener("click", () => lbSetIndex(Lb.index + 1));
 
 if (lightbox) {
   lightbox.addEventListener("click", (e) => {
@@ -1525,57 +1554,29 @@ if (lightbox) {
 }
 
 document.addEventListener("keydown", (e) => {
-  if (!lightbox || lightbox.classList.contains("hidden")) return;
+  if (!lightbox || isHidden(lightbox)) return;
   if (e.key === "Escape") closeLightbox();
-  if (e.key === "ArrowLeft") lbSetIndex(lbIndex - 1);
-  if (e.key === "ArrowRight") lbSetIndex(lbIndex + 1);
+  if (e.key === "ArrowLeft") lbSetIndex(Lb.index - 1);
+  if (e.key === "ArrowRight") lbSetIndex(Lb.index + 1);
 });
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js");
   });
 }
-function showServicesDisclaimer(){
-  const el = document.getElementById("servicesDisclaimer");
+
+function showServicesDisclaimer() {
+  const el = $("#servicesDisclaimer");
   if (!el) return;
 
   el.classList.remove("hidden");
 
-  const btn = document.getElementById("closeDisclaimer");
-  if (btn) {
-    btn.onclick = () => {
+  const btn = $("#closeDisclaimer");
+  if (btn && !btn.__bound) {
+    btn.__bound = true;
+    btn.addEventListener("click", () => {
       el.classList.add("hidden");
-    };
+    });
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

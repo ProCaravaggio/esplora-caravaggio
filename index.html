@@ -24,15 +24,13 @@
 
   
 <body>
+
+<div id="splash">
+  <img src="icons/logoespcara.png" alt="Esplora Caravaggio" class="splash-logo">
+</div>
+
 <header class="topbar">
-  <div class="brand">
-    <img src="icons/logoespcara.png" alt="Esplora Caravaggio" class="logo">
-  </div>
-
-  <button id="toggleTopbar" class="topbar-toggle" type="button"
-          aria-expanded="true" aria-label="Comprimi pannello">▾</button>
-
-<div class="controls">
+  <div class="controls">
 <div class="btn-row icon-bar">
 
   <button id="toggleCats" class="icon-btn">
@@ -69,7 +67,9 @@
     </div>
   </div>
 </div>
-
+  <div class="brand">
+    <img src="icons/logoespcara.png" alt="Esplora Caravaggio" class="logo">
+  </div>
 </header>
 
 <main class="layout">
@@ -170,6 +170,16 @@
     <button id="closeDisclaimer">Ho capito</button>
   </div>
 </div>
+<script>
+  (function(){
+    var s = document.getElementById('splash');
+    if (!s) return;
+    setTimeout(function(){
+      s.style.opacity = '0';
+      setTimeout(function(){ s.remove(); }, 300);
+    }, 1400);
+  })();
+</script>
 </body>
 </html>
 
