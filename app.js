@@ -461,6 +461,7 @@ const clearSearchBtn = $("#clearSearch");
 const sidePanel = $("#sidePanel");
 const closePanel = $("#closePanel");
 const panelContent = $("#panelContent");
+const panelBackdrop = $("#panelBackdrop");
 
 // Header height (per drawer)
 const headerEl = $(".topbar");
@@ -484,10 +485,24 @@ window.addEventListener("resize", syncHeaderHeight);
 syncHeaderHeight();
 let fullHeaderH = headerEl ? headerEl.offsetHeight : 120;
 
+// Re-sync after all resources (fonts, images) are loaded so --header-h is accurate.
+window.addEventListener("load", () => {
+  syncHeaderHeight();
+  syncFooterHeight();
+  if (headerEl && !headerEl.classList.contains("is-collapsed")) {
+    fullHeaderH = headerEl.offsetHeight;
+  }
+  if (map) map.invalidateSize();
+});
+
 window.addEventListener("pageshow", (e) => {
   if (e.persisted) {
+    if (headerEl) headerEl.classList.remove("is-collapsed");
+    document.body.classList.remove("ui-hidden");
+    if (document.activeElement) document.activeElement.blur();
     syncHeaderHeight();
     syncFooterHeight();
+    fullHeaderH = headerEl ? headerEl.offsetHeight : fullHeaderH;
     if (map) map.invalidateSize();
   }
 });
@@ -677,6 +692,7 @@ const openGuide = $("#openGuide");
 if (openGuide) {
   openGuide.addEventListener("pointerup", (e) => {
     e.preventDefault();
+    openGuide.blur();
     window.location.href = "guida.html";
   }, { passive: false });
 }
@@ -857,7 +873,9 @@ async function copyLinkForPoi(p) {
 function openPanel(p, distancePretty) {
   if (!sidePanel || !panelContent) return;
 
-  if (window.matchMedia("(max-width: 640px)").matches) setTopbarCollapsed(true);
+  if (window.matchMedia("(max-width: 640px)").matches && panelBackdrop) {
+    panelBackdrop.classList.remove("hidden");
+  }
 
   const imgs = Array.isArray(p.imgs) ? p.imgs : (p.img ? [p.img] : []);
   const sliderHtml = imgs.length
@@ -918,6 +936,7 @@ function openPanel(p, distancePretty) {
 
   sidePanel.classList.remove("hidden");
   sidePanel.setAttribute("aria-hidden", "false");
+  if (headerEl) headerEl.classList.add("panel-open");
 
   // animazione leggera
   sidePanel.classList.remove("anim-in");
@@ -949,8 +968,12 @@ function closeSidePanel() {
   if (!sidePanel) return;
   sidePanel.classList.add("hidden");
   sidePanel.setAttribute("aria-hidden", "true");
+  if (headerEl) headerEl.classList.remove("panel-open");
+  if (panelBackdrop) panelBackdrop.classList.add("hidden");
   clearPoiUrlParam();
 }
+
+if (panelBackdrop) panelBackdrop.addEventListener("click", closeSidePanel);
 
 if (closePanel) closePanel.addEventListener("click", closeSidePanel);
 

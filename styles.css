@@ -271,7 +271,7 @@ a:visited{
   box-shadow: var(--shadow);
   padding: 8px 14px 14px;
   overflow:auto;
-  z-index: 2000;
+  z-index: 5500;
 }
 .side-panel.hidden{ display:none; }
 
@@ -338,6 +338,41 @@ line-height: 1.12;
 .side-panel.anim-in{
   animation: panelIn .18s ease-out;
 }
+
+@media (max-width: 640px){
+  @keyframes panelSlideUp{
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+  }
+  .side-panel{
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    border-bottom: none;
+    padding-bottom: 14px;
+    z-index: 6000;
+    background: var(--paper-noise), var(--panel);
+  }
+  .side-panel.anim-in{
+    animation: panelSlideUp .30s cubic-bezier(.2,.9,.3,1);
+  }
+}
+
+/* Backdrop mobile: copre i bottoni quando la scheda è aperta */
+.panel-backdrop{
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 5999;
+}
+.panel-backdrop:not(.hidden){ display: block; }
 
 /* Bottoni azioni nel pannello */
 .panel-actions{
@@ -767,9 +802,13 @@ line-height: 1.12;
   max-height: 0;
   opacity: 0;
   margin-top: 0;
+  pointer-events: none !important;
 }
 .topbar.is-collapsed{
   padding-bottom: 10px;
+}
+@media (max-width: 640px){
+  .topbar.panel-open{ pointer-events: none !important; }
 }
 
 @media (max-width: 640px){
@@ -1442,11 +1481,28 @@ html, body{
   body{ position: static !important; inset: auto !important; }
 }
 
+/* Disabilita i controlli quando la scheda POI è aperta su mobile */
+@media (max-width: 640px){
+  .topbar.panel-open .controls{ pointer-events: none !important; }
+  .topbar.panel-open .controls button,
+  .topbar.panel-open .controls a,
+  .topbar.panel-open .controls input,
+  .topbar.panel-open .controls select{ pointer-events: none !important; }
+}
+
 /* non ammazzare i click dentro ai bottoni */
 .topbar .controls button *,
 .topbar .controls a *,
 #openGuide *{
   pointer-events: auto !important;
+}
+
+/* quando la scheda POI è aperta su mobile, blocca tutto l'interattivo sopra la mappa */
+@media (max-width: 640px){
+  .topbar.panel-open,
+  .topbar.panel-open *{
+    pointer-events: none !important;
+  }
 }
 .leaflet-control-attribution{
   background: rgba(27,20,16,.85) !important;

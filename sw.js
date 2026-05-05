@@ -1,4 +1,4 @@
-const CACHE_NAME = "mappacaravaggio-v1";
+const CACHE_NAME = "mappacaravaggio-v6";
 
 const ASSETS = [
   "./",

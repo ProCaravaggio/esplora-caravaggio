@@ -3,7 +3,7 @@
 <head>
   
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Esplora Caravaggio</title>
   
 <link rel="manifest" href="manifest.webmanifest">
@@ -74,14 +74,14 @@
 
 <main class="layout">
   <div id="map"></div>
-
-  <aside id="sidePanel" class="side-panel hidden" aria-label="Dettagli punto di interesse" aria-hidden="true">
-    <div class="panel-head">
-      <button id="closePanel" class="btn-ghost" type="button" aria-label="Chiudi scheda">✕</button>
-    </div>
-    <div id="panelContent"></div>
-  </aside>
 </main>
+
+<aside id="sidePanel" class="side-panel hidden" aria-label="Dettagli punto di interesse" aria-hidden="true">
+  <div class="panel-head">
+    <button id="closePanel" class="btn-ghost" type="button" aria-label="Chiudi scheda">✕</button>
+  </div>
+  <div id="panelContent"></div>
+</aside>
 
 <footer class="footer">
   <div class="footer-inner">
@@ -96,6 +96,8 @@
 </div>
   </div>
 </footer>
+
+<div id="panelBackdrop" class="panel-backdrop hidden"></div>
 
 <div id="lightbox" class="lightbox hidden" aria-hidden="true">
   <div class="frame" role="dialog" aria-modal="true" aria-label="Galleria immagini">
