@@ -1,5 +1,5 @@
 :root{
-  --header-h: 120px;
+  --header-h: 60px;
   --footer-h: 56px;
   --bg: #1B1410;
   --panel: rgba(34,26,21,.92);
@@ -53,17 +53,21 @@ a:visited{
 }
 @media (prefers-reduced-motion: reduce){
   *{ animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .layout{ transition: none !important; }
 }
 
 /* HEADER */
 .topbar{
-  padding: 14px 16px;
+  padding: 8px 16px;
   background:
     var(--paper-noise),
     linear-gradient(180deg, rgba(34,26,21,.96), rgba(34,26,21,.86));
   border-bottom: 1px solid var(--border);
   position: relative;
   box-shadow: 0 10px 26px rgba(0,0,0,.35);
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 /* aria/gradiente verso la mappa */
@@ -97,11 +101,60 @@ a:visited{
 }
 
 .controls{
-  margin-top: 12px;
+  margin-top: 0;
+  flex: 1;
+  min-width: 0;
   display:flex;
   gap:10px;
-  flex-wrap:wrap;
-  align-items:flex-end;
+  flex-wrap:nowrap;
+  align-items:center;
+}
+
+.brand{
+  flex-shrink: 0;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+/* Desktop: bottoni ravvicinati, barra di ricerca limitata a ~1/5 */
+@media (min-width: 641px){
+  .topbar .btn-row{
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  .topbar .search-row{
+    flex: 0 1 35%;
+    min-width: 0;
+    max-width: 380px;
+  }
+}
+
+.topbar .search-wrap{
+  background: rgba(54, 38, 28, .36);
+  border: 1px solid rgba(242,233,220,.14);
+  border-radius: 18px;
+  padding: 6px 12px;
+  transition: background .18s ease, border-color .18s ease;
+  width: 100%;
+  min-width: 0;
+}
+.topbar .search-wrap:focus-within{
+  background: rgba(54, 38, 28, .70);
+  border-color: rgba(200,161,90,.35);
+}
+.topbar #searchInput{
+  background: transparent;
+  border: none;
+  outline: none;
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  padding: 4px 0;
+}
+.topbar #searchInput::placeholder{
+  color: rgba(242,233,220,.55);
 }
 
 .field{
@@ -679,63 +732,64 @@ line-height: 1.12;
 }
 
 /* =========================
-   Topbar collassabile (solo mobile)
+   Topbar collassabile
 ========================= */
-.topbar-toggle{ display:none; }
+.topbar-toggle{
+  display: grid;
+  place-items: center;
+  position: absolute;
+  right: 12px;
+  top: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(242,233,220,.18);
+  background: rgba(15,13,11,.45);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  z-index: 20;
+  transition: filter .18s ease;
+}
+.topbar-toggle:hover{ filter: brightness(1.08); }
+
+.topbar .controls{
+  overflow: visible;
+  opacity: 1;
+}
+@media (max-width: 640px){
+  .topbar .controls{
+    transition: opacity .18s ease;
+  }
+}
+.topbar.is-collapsed .controls{
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+}
+.topbar.is-collapsed{
+  padding-bottom: 10px;
+}
 
 @media (max-width: 640px){
   .topbar-toggle{
-    display: grid;
-    place-items: center;
-
-    position: absolute;
-    right: 12px;
-    top: 14px;
-
     width: 46px;
     height: 46px;
     border-radius: 14px;
-
-    border: 1px solid rgba(242,233,220,.18);
     background: rgba(15,13,11,.55);
-    color: var(--text);
-
-    cursor: pointer;
     font-size: 18px;
-    line-height: 1;
-
-    z-index: 20;
     -webkit-tap-highlight-color: transparent;
-
     box-shadow: 0 10px 24px rgba(0,0,0,.30);
     backdrop-filter: blur(6px);
-
     transition: transform .18s ease, filter .18s ease, background .18s ease;
     transform: rotate(0deg);
   }
 
-  .topbar-toggle:hover{ filter: brightness(1.08); }
   .topbar-toggle:active{ transform: translateY(1px) scale(.98); }
 
   .topbar.is-collapsed .topbar-toggle{
     transform: rotate(180deg);
-  }
-
-  .topbar .controls{
-    overflow: hidden;
-    transition: max-height .25s ease, opacity .18s ease, margin-top .18s ease;
-    max-height: 520px;
-    opacity: 1;
-  }
-
-  .topbar.is-collapsed .controls{
-    max-height: 0;
-    opacity: 0;
-    margin-top: 0;
-  }
-
-  .topbar.is-collapsed{
-    padding-bottom: 10px;
   }
 }
 
@@ -864,7 +918,8 @@ padding-top: 10px;
 .search-row{
   display:flex;
   gap:10px;
-  align-items:flex-end;
+  align-items:center;
+  min-width: 0;
 }
 .field.grow{ flex: 1; }
 
@@ -1123,13 +1178,15 @@ padding-top: 10px;
   /* evita sforamenti strani su iOS */
   .topbar, .topbar *{ box-sizing: border-box; }
 
-  /* Header più compatto + angoli più arrotondati */
+  /* Topbar invisibile su mobile: i controlli flottano sulla mappa */
   .topbar{
-    padding: 12px 14px 10px;
-    border-bottom-left-radius: 22px;
-    border-bottom-right-radius: 22px;
+    height: 0;
+    padding: 0;
+    border: none;
+    box-shadow: none;
     overflow: hidden;
   }
+  .topbar::after{ display: none; }
   .brand h1{ margin:0; font-size: 22px; line-height: 1.15; }
   .brand p{ margin: 4px 0 0; font-size: 13px; opacity: .85; }
 
@@ -1356,6 +1413,7 @@ html, body{
   left: 0;
   right: 0;
   min-height: 0;
+  transition: top .25s ease;
 }
 #map{
   position: absolute;
@@ -1467,8 +1525,30 @@ html, body{
   vertical-align: middle;
   margin-left: 4px;
 }
+/* Splash screen */
+#splash{
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: #1B1410;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+.splash-logo{
+  width: 290px;
+  height: auto;
+}
+
+/* Hide logo in topbar on mobile */
+@media (max-width: 640px){
+  .topbar .brand{ display: none; }
+}
+
 .logo{
-  height: 60px;
+  height: 40px;
   width: auto;
   vertical-align: middle;
   margin-left: 2px;
