@@ -716,7 +716,7 @@ line-height: 1.12;
 ========================= */
 .footer{
   border-top: 1px solid var(--border);
-  background: rgba(34,26,21,.88);
+  background: var(--bg);
   padding: 10px 16px calc(18px + env(safe-area-inset-bottom)) 16px;
   text-align: center;
 }
