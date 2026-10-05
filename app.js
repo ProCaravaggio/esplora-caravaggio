@@ -46,7 +46,7 @@ window.addEventListener("resize", kickLeafletResize);
 window.addEventListener("orientationchange", kickLeafletResize);
 map.setView(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom);
 
-L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=cb1_48xx_1_7fbb2d4ba5d169b95c69ea35", {
   maxZoom: 19,
   attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
 }).addTo(map);
@@ -1208,6 +1208,8 @@ function bindPoiCardActions(container) {
 
     card.addEventListener("click", (e) => {
       if (e.target && e.target.closest(".fav-mini")) return;
+      closeNearbyDrawer();
+      closeFavsDrawer();
       map.setView([p.lat, p.lon], 17, { animate: true });
       openPanel(p, getPrettyDistance(p));
     });
