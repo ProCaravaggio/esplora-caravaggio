@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Privacy Policy – CaraVisit</title>
+  <title>Privacy Policy – Esplora Caravaggio</title>
   <link rel="stylesheet" href="legal.css">
   <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="favicon.png">
@@ -23,104 +23,86 @@
     <article class="legal-card">
       <h1>Privacy Policy</h1>
 
-<p>Questa applicazione è un progetto realizzato da <strong>ProCaravaggio</strong>.</p>
+<p>Questa webapp è un progetto realizzato da <strong>ProCaravaggio</strong>.</p>
 
-<p><strong>Informativa su privacy e trattamento dei dati personali</strong> sulla base del <a href="https://www.garanteprivacy.it/il-testo-del-regolamento">Regolamento Europeo sulla Protezione dei Dati n. 679/2016 (GDPR).</a>  
+<p><strong>Informativa su privacy e trattamento dei dati personali</strong> sulla base del <a href="https://www.garanteprivacy.it/il-testo-del-regolamento">Regolamento Europeo sulla Protezione dei Dati n. 679/2016 (GDPR).</a></p>  
      
       
 <h2>Titolare del trattamento</h2>
 <p>Il titolare del trattamento dei dati è l'associazione <strong>ProCaravaggio</strong>, contattabile all'indirizzo <a href="mailto:procaravaggio@gmail.com">procaravaggio@gmail.com</a>.</p>
 
 <h2>Dati trattati</h2>
-<p>L’app può trattare esclusivamente i seguenti dati:</p>
+<p>La webapp può trattare esclusivamente i seguenti dati:</p>
 <ul>
-  <li><strong>posizione geografica</strong> dell’utente, solo se l’accesso viene autorizzato dal browser;</li>
-  <li><strong>preferiti</strong> salvati dall’utente, memorizzati localmente sul dispositivo tramite LocalStorage.</li>
+  <li><strong>posizione geografica</strong> dell'utente, solo se l'accesso viene autorizzato dal browser; viene usata sia in modo puntuale ("Dove sono io?", "Vicino a me") sia in modo continuo durante la modalità percorso/tracciamento;</li>
+  <li><strong>orientamento del dispositivo</strong> (bussola), solo se autorizzato, usato per ruotare la freccia di posizione sulla mappa;</li>
+  <li><strong>preferiti</strong> salvati dall'utente, memorizzati localmente sul dispositivo tramite LocalStorage.</li>
 </ul>
 
 <h2>Finalità del trattamento</h2>
 <p>I dati vengono utilizzati esclusivamente per:</p>
 <ul>
-  <li>mostrare i luoghi vicini alla posizione dell’utente;</li>
+  <li>mostrare i luoghi vicini alla posizione dell'utente;</li>
+  <li>mostrare la posizione sulla mappa e, in modalità percorso, calcolare tempo e distanza percorsa;</li>
   <li>consentire il salvataggio dei luoghi preferiti.</li>
 </ul>
+<p>La geolocalizzazione e l'orientamento del dispositivo vengono utilizzati solo a seguito del <strong>consenso</strong> dell'utente, espresso tramite l'autorizzazione richiesta dal browser (art. 6, par. 1, lett. a, GDPR). Il salvataggio dei preferiti avviene solo su richiesta esplicita dell'utente, che utilizza la relativa funzione.</p>
 
-<p>Il trattamento dei dati personali è operato a seguito del <strong>consenso esplicito dell’utente</strong>, espresso tramite:</p>
-<ul>
-  <li>l’autorizzazione alla geolocalizzazione;</li>
-  <li>l’utilizzo volontario della funzione “Preferiti”.</li>
-</ul>
 
 <h2>Modalità del trattamento</h2>
-<p>I dati:</p>
+<p>La posizione geografica, i dati del tracciamento e i preferiti:</p>
 <ul>
-  <li>non vengono trasmessi a server esterni;</li>
+  <li>non vengono trasmessi ai gestori della webapp;</li>
   <li>non vengono salvati su database remoti;</li>
-  <li>restano memorizzati esclusivamente sul dispositivo dell’utente.</li>
+  <li>restano elaborati ed eventualmente memorizzati esclusivamente sul dispositivo dell'utente.</li>
 </ul>
+<p>Alcuni servizi di terze parti, descritti più sotto, ricevono dati tecnici necessari al funzionamento della webapp.</p>
 
 <h2>Conservazione dei dati</h2>
-<p>I dati vengono conservati localmente fino a quando l’utente non:</p>
+<p><strong>Posizione geografica e tracciamento:</strong> sono elaborati solo in tempo reale, in memoria, e non vengono registrati né conservati. Cessano di essere elaborati alla chiusura della webapp o alla revoca del permesso nel browser.</p>
+<p><strong>Preferiti:</strong> restano memorizzati sul dispositivo fino a quando l'utente li rimuove o cancella i dati del sito dal proprio browser. La revoca del permesso di geolocalizzazione non cancella i preferiti.</p>
+
+<h2>Condivisione dei dati e servizi di terze parti</h2>
+<p>I gestori della webapp non raccolgono, comunicano o cedono dati personali degli utenti a terzi. La posizione geografica è elaborata localmente dal browser dell'utente.</p>
+
+<p><strong>Google Maps.</strong> Il pulsante "Apri Google Maps" apre un link esterno. Se la posizione dell'utente è disponibile, le sue coordinate vengono incluse nel link come punto di partenza e quindi comunicate a Google, che le tratta secondo la propria informativa. L'utente può evitarlo non usando questa funzione.</p>
+
+<p><strong>Mappe.</strong> La webapp utilizza mappe fornite da OpenStreetMap e CARTO. Durante il caricamento, tali servizi possono ricevere dati tecnici come indirizzo IP e informazioni sul dispositivo.</p>
 <ul>
-  <li>revoca il consenso alla geolocalizzazione nel browser;</li>
-  <li>cancella i dati del sito dal proprio browser.</li>
-  </ul>
-<p>I dati di posizione non vengono memorizzati su server e restano esclusivamente sul dispositivo dell’utente per la durata della sessione. La posizione geografica viene utilizzata esclusivamente in tempo reale
-e non viene registrata né conservata.</p>
+  <li>OpenStreetMap: <a href="https://wiki.osmfoundation.org/wiki/Privacy_Policy" target="_blank" rel="noopener noreferrer">privacy policy</a></li>
+  <li>CARTO: <a href="https://carto.com/privacy/" target="_blank" rel="noopener noreferrer">privacy policy</a></li>
+</ul>
 
+<p><strong>Librerie tecniche (CDN).</strong> La webapp carica librerie (Leaflet, Marked, DOMPurify) da reti di distribuzione di contenuti. I fornitori possono ricevere dati tecnici come indirizzo IP e informazioni sul dispositivo.</p>
 
-<h2>Condivisione dei dati</h2>
-<p>I gestori dell’applicazione non raccolgono, comunicano o cedono dati personali degli utenti a terzi. La posizione geografica è elaborata localmente dal browser dell'utente al solo fine di mostrare i luoghi vicini.</p>
-       <p>
-  L’app utilizza mappe fornite da servizi esterni (OpenStreetMap e CARTO) per la
-  visualizzazione cartografica. Durante il caricamento delle mappe, tali servizi
-  possono ricevere dati tecnici come l’indirizzo IP e informazioni sul dispositivo,
-  necessari al funzionamento del servizio.
-  </p>
+<p><strong>Hosting.</strong> Il sito è ospitato presso GitHub Pages, che può registrare log tecnici di accesso (ad esempio l'indirizzo IP) per ragioni di sicurezza e funzionamento.</p>
 
-  <p>Per maggiori informazioni:</p>
-  <ul>
-    <li>
-      OpenStreetMap:
-      <a href="https://wiki.osmfoundation.org/wiki/Privacy_Policy" target="_blank" rel="noopener noreferrer">
-        privacy policy
-      </a>
-    </li>
-    <li>
-      CARTO:
-      <a href="https://carto.com/privacy/" target="_blank" rel="noopener noreferrer">
-        privacy policy
-      </a>
-    </li>
-  </ul>
-<p>
-L’app utilizza anche librerie tecniche caricate da reti di distribuzione di contenuti
-(Content Delivery Network – CDN), tra cui Leaflet, Marked e DOMPurify,
-necessarie al funzionamento dell’interfaccia.
-Durante il caricamento di tali risorse, i rispettivi fornitori possono ricevere
-dati tecnici come l’indirizzo IP e informazioni sul dispositivo.
-</p>
+<p><strong>Trasferimenti extra-UE.</strong> Alcuni dei fornitori sopra indicati possono trattare dati tecnici anche in Paesi al di fuori dell'Unione Europea, secondo le garanzie previste dalle rispettive informative.</p>
+      
 
 <h2>Tecnologie di memorizzazione locale</h2>
-<p>L’app utilizza esclusivamente tecnologie di memorizzazione locale (LocalStorage e Cache Storage) per:</p>
+<p>La webapp utilizza esclusivamente tecnologie di memorizzazione locale (LocalStorage e Cache Storage) per:</p>
 <ul>
   <li>salvare i preferiti;</li>
   <li>consentire il funzionamento offline.</li>
 </ul>
 <p>Non vengono utilizzati cookie di profilazione né strumenti di tracciamento.</p>
 
-<h2>Diritti dell’utente</h2>
-<p>Ai sensi degli articoli 15–22 del GDPR, l’utente ha diritto di:</p>
+      
+<h2>Diritti dell'utente</h2>
+<p>Ai sensi degli articoli 15–22 del GDPR, l'utente ha diritto di:</p>
 <ul>
   <li>accedere ai propri dati;</li>
-  <li>chiederne la cancellazione;</li>
-  <li>limitare o opporsi al trattamento;</li>
-  <li>revocare il consenso in qualsiasi momento.</li>
+  <li>chiederne la rettifica o la cancellazione;</li>
+  <li>limitare il trattamento o opporsi ad esso;</li>
+  <li>richiedere la portabilità dei dati;</li>
+  <li>revocare il consenso in qualsiasi momento, senza pregiudizio per la liceità del trattamento precedente.</li>
 </ul>
-<p>Per eventuali richieste scrivere a <a href="mailto:procaravaggio@gmail.com">procaravaggio@gmail.com</a>.</p>
+<p>Per richieste scrivere a <a href="mailto:procaravaggio@gmail.com">procaravaggio@gmail.com</a>. L'utente ha inoltre diritto di proporre reclamo al <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener noreferrer">Garante per la protezione dei dati personali</a>.</p>
 
 <h2>Modifiche alla presente informativa</h2>
-<p>La presente informativa può essere aggiornata in caso di modifiche funzionali all’applicazione. Ultimo aggiornamento: 10/02/2026.</p>
+<p>La presente informativa può essere aggiornata in caso di modifiche funzionali alla webapp. 
+  Ultimo aggiornamento: 06/10/2026.</p>
 
     </article>
 
